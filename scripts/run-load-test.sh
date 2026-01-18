@@ -95,8 +95,8 @@ k6 run /tmp/load-test.js --out json=/tmp/k6-results.json 2>&1 | tee /tmp/k6-outp
 
 # Check if load test succeeded
 if [ ${PIPESTATUS[0]} -ne 0 ]; then
-  echo "⚠️  Load test completed with some failures"
-  test_status="⚠️ Completed with warnings"
+  echo " Load test completed with some failures"
+  test_status="Completed with warnings"
 else
   echo " Load test completed successfully"
   test_status="Passed"
