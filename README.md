@@ -118,6 +118,21 @@ thresholds: {
 
 Probably timeout or permissions. Check Actions logs. Increase timeouts in scripts or add `pull-requests: write` permission.
 
-## Notes
+## Reusable Actions
 
-Scripts use `set -euo pipefail` so they fail fast. `kubectl wait` commands have timeouts and error handlers that dump debug info before exiting.
+There's some reusable actions in `.github/actions/` just to simulate reusability of our pipeline actions. such as:
+
+- `setup-kind` - Creates KinD cluster. Just pass cluster name if you want.
+- `setup-k6` - Installs k6. No config needed.
+- `wait-for-deployment` - Waits for a deployment to be ready. Pass deployment name and timeout.
+- `post-pr-comment` - Posts a comment to PR. Pass path to markdown file.
+
+Use them like:
+
+```yaml
+- uses: ./.github/actions/setup-kind
+  with:
+    cluster-name: "my-cluster"
+```
+
+#### Damilola Olufunmilayo
