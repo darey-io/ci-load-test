@@ -1,0 +1,92 @@
+name: 'Setup KinD Cluster'
+description: 'Creates a KinD cluster with ingress controller'
+inputs:
+  cluster-name:
+    description: 'Name of the KinD cluster'
+    required: false
+    default: 'load-test-cluster'
+  kind-version:
+    description: 'KinD version to install'
+    required: false
+    default: 'v0.20.0'
+  ingress-version:
+    description: 'Nginx ingress controller version'
+    required: false
+    default: 'controller-v1.9.4'
+  wait-timeout:
+    description: 'Timeout for cluster and ingress readiness'
+    required: false
+    default: '300s'
+outputs:
+  cluster-name:
+    description: 'Name of the created cluster'
+    value: ${{ inputs.cluster-name }}
+  kubeconfig:
+    description: 'Path to kubeconfig'
+    value: ${{ env.KUBECONFIG }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install KinD
+      shell: bash
+      run: |
+        echo "Installing KinD ${{ inputs.kind-version }}..."
+        curl -Lo ./kind https://kind.sigs.k8s.io/dl/${{ inputs.kind-version }}/kind-linux-amd64
+        chmod +x ./kind
+        sudo mv ./kind /usr/local/bin/kind
+        kind version
+
+    - name: Create cluster config
+      shell: bash
+      run: |
+        cat <<EOF > /tmp/kind-config.yaml
+        kind: Cluster
+        apiVersion: kind.x-k8s.io/v1alpha4
+        nodes:
+        - role: control-plane
+          kubeadmConfigPatches:
+          - |
+            kind: InitConfiguration
+            nodeRegistration:
+              kubeletExtraArgs:
+                node-labels: "ingress-ready=true"
+          extraPortMappings:
+          - containerPort: 80
+            hostPort: 80
+            protocol: TCP
+          - containerPort: 443
+            hostPort: 443
+            protocol: TCP
+        - role: worker
+          labels:
+            tier: backend
+        - role: worker
+          labels:
+            tier: backend
+        EOF
+
+    - name: Create cluster
+      shell: bash
+      run: |
+        echo "Creating KinD cluster ${{ inputs.cluster-name }}..."
+        kind create cluster --name ${{ inputs.cluster-name }} --config=/tmp/kind-config.yaml --wait ${{ inputs.wait-timeout }}
+        kubectl cluster-info --context kind-${{ inputs.cluster-name }}
+        kubectl get nodes -o wide
+
+    - name: Install Nginx Ingress
+      shell: bash
+      run: |
+        echo "Installing Nginx Ingress Controller ${{ inputs.ingress-version }}..."
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/${{ inputs.ingress-version }}/deploy/static/provider/kind/deploy.yaml
+
+    - name: Wait for ingress controller
+      shell: bash
+      run: |
+        echo "Waiting for ingress controller to be ready..."
+        kubectl wait --namespace ingress-nginx \
+          --for=condition=ready pod \
+          --selector=app.kubernetes.io/component=controller \
+          --timeout=${{ inputs.wait-timeout }}
+        kubectl get pods -n ingress-nginx
+

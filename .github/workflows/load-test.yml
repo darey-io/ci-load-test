@@ -4,45 +4,79 @@ on:
   pull_request:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   load-test:
+    name: Run Load Test Pipeline
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       contents: read
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Setup KinD cluster
-        run: |
-          chmod +x ./scripts/setup-cluster.sh
-          ./scripts/setup-cluster.sh
+        uses: ./.github/actions/setup-kind
+        with:
+          cluster-name: "load-test-cluster"
 
-      - name: Deploy applications
+      - name: Deploy foo service
         run: |
-          chmod +x ./scripts/deploy-apps.sh
-          ./scripts/deploy-apps.sh
+          kubectl apply -f k8s/foo-deployment.yaml
+
+      - name: Wait for foo deployment
+        uses: ./.github/actions/wait-for-deployment
+        with:
+          deployment-name: "foo-echo"
+          timeout: "180s"
+
+      - name: Deploy bar service
+        run: |
+          kubectl apply -f k8s/bar-deployment.yaml
+
+      - name: Wait for bar deployment
+        uses: ./.github/actions/wait-for-deployment
+        with:
+          deployment-name: "bar-echo"
+          timeout: "180s"
+
+      - name: Deploy ingress
+        run: |
+          kubectl apply -f k8s/ingress.yaml
+
+      - name: Wait for ingress
+        run: |
+          kubectl wait --for=jsonpath='{.status.loadBalancer.ingress}' --timeout=180s ingress/echo-ingress
+
+      - name: Verify endpoints
+        run: |
+          sleep 5
+          curl -H "Host: foo.localhost" http://localhost/ | grep -q foo
+          curl -H "Host: bar.localhost" http://localhost/ | grep -q bar
+
+      - name: Setup k6
+        uses: ./.github/actions/setup-k6
 
       - name: Run load test
-        id: load-test
         run: |
           chmod +x ./scripts/run-load-test.sh
           ./scripts/run-load-test.sh
 
-      - name: Post results to PR
+      - name: Upload test results
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/upload-artifact@v4
         with:
-          script: |
-            const fs = require('fs');
-            const results = fs.readFileSync('/tmp/load-test-results.md', 'utf8');
-            
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: results
-            });
+          name: load-test-results
+          path: |
+            /tmp/k6-results.json
+            /tmp/k6-summary.json
+            /tmp/load-test-results.md
+          retention-days: 30
+
+      - name: Post PR comment
+        if: always() && github.event_name == 'pull_request'
+        uses: ./.github/actions/post-pr-comment
+        with:
+          comment-file: "/tmp/load-test-results.md"

@@ -1,0 +1,59 @@
+name: 'Wait for Deployment'
+description: 'Waits for a Kubernetes deployment to be ready'
+inputs:
+  deployment-name:
+    description: 'Name of the deployment'
+    required: true
+  namespace:
+    description: 'Namespace (defaults to default)'
+    required: false
+    default: 'default'
+  timeout:
+    description: 'Timeout in seconds'
+    required: false
+    default: '180s'
+  check-pods:
+    description: 'Also wait for pods to be ready'
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Wait for deployment
+      shell: bash
+      run: |
+        namespace="${{ inputs.namespace }}"
+        if [ "$namespace" != "default" ]; then
+          ns_flag="-n $namespace"
+        else
+          ns_flag=""
+        fi
+        
+        echo "Waiting for deployment ${{ inputs.deployment-name }} to be available..."
+        kubectl wait --for=condition=available --timeout=${{ inputs.timeout }} $ns_flag deployment/${{ inputs.deployment-name }} || {
+          echo "Deployment ${{ inputs.deployment-name }} failed to become ready"
+          kubectl describe deployment ${{ inputs.deployment-name }} $ns_flag
+          exit 1
+        }
+
+    - name: Wait for pods
+      if: inputs.check-pods == 'true'
+      shell: bash
+      run: |
+        namespace="${{ inputs.namespace }}"
+        if [ "$namespace" != "default" ]; then
+          ns_flag="-n $namespace"
+        else
+          ns_flag=""
+        fi
+        
+        echo "Waiting for pods to be ready..."
+        label_selector="app=${{ inputs.deployment-name }}"
+        kubectl wait --for=condition=ready pod -l "$label_selector" --timeout=${{ inputs.timeout }} $ns_flag || {
+          echo "Pods for ${{ inputs.deployment-name }} failed to become ready"
+          kubectl get pods -l "$label_selector" $ns_flag
+          kubectl logs -l "$label_selector" --tail=50 $ns_flag
+          exit 1
+        }
+
